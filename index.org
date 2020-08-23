@@ -296,8 +296,6 @@ type family Anno a = b
  src_haskell[:exports code]{foo} form, which matches the "after
  resolution" src_haskell[:exports code]{XRec} family.
 
-** AnnSortKey
-
 ** Usage for printing
 
  - This part is still under heavy development, but enough has been done
