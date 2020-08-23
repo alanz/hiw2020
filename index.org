@@ -1,0 +1,468 @@
+#+Title: Exactprint in GHC (HIW 2020)
+#+Author: Alan Zimmerman
+#+Email: @alan_zimm
+
+#+REVEAL_INIT_OPTIONS: width:1200, height:800, margin: 0.1, minScale:0.2, maxScale:2.5, slideNumber: 'c/t'
+#+OPTIONS: num:nil toc:nil
+#+REVEAL_THEME: white
+#+REVEAL_HLEVEL: 2
+#+REVEAL_TRANS: linear
+#+REVEAL_PLUGINS: (markdown notes)
+#+REVEAL_EXTRA_CSS: ./local.css
+# #+REVEAL_SLIDE_HEADER: HEADER_BLAH_BLAH
+# #+REVEAL_SLIDE_FOOTER: FOOTER_BLAH_BLAH
+
+* Introduction
+
+# #+ATTR_REVEAL: :frag (appear)
+  - It all started with *HaRe*
+
+  - Two main problems
+    * integrate down into GHC
+    * integrate up into IDEs
+
+  - I favour general solutions
+    * ghc-exactprint
+    * haskell-language-server ecosystem
+
+* ghc-exactprint
+
+# #+ATTR_REVEAL: :frag (appear)
+- Initial commit Sep 2014
+
+- Story starts earlier, getting rid of the src_haskell[:exports code]{panic "blah"} entries in
+  the GHC AST
+
+- But the AST did not actually reflect the parsed source
+  * information loss during initial parsing
+  * Literals.
+
+By *GHC 7.10* the src_haskell[:exports code]{ParsedSource} accurately reflected the state of the
+original source
+
+** Goals
+
+ - First, accurately reproduce the source code, from the src_haskell[:exports code]{ParsedSource}
+ - Second, more important
+   * allow *changes* to be made to the src_haskell[:exports
+     code]{ParsedSource}, purely as transformations of the AST,
+   * such that when printed out the source still reflects the original as much as possible
+   * *and* the code still compiles. (HaRe background)
+
+** Implications
+
+ - layout
+ - order in lists
+ - comments
+ - src_haskell[:exports code]{SrcSpan}s are no longer meaningful
+
+** Successful
+
+ - Many tools built on top of it
+     * HaRe (now dormant)
+     * apply-refact (for hlint, now moved to GHC AST too)
+     * multiple formatters
+     * retrie
+     * others
+
+ #+begin_notes
+ https://packdeps.haskellers.com/reverse/ghc-exactprint
+ - apply-refact
+ - brittany
+ - HaRe
+ - hgrep
+ - lens-th-rewrite
+ - retrie
+ - smuggler
+ - smuggler2
+ #+end_notes
+
+** But
+
+ - There are problems
+
+   * Annotations added and maintained in GHC, but the library using
+     them is separate
+   * *ghc-exactprint* is only updated when release time gets near
+
+ - This makes it hard for GHC developers to check changes to API
+   Annotations
+
+* Proposed Solution
+
+- Move the exact printing into the GHC source tree
+
+  - Multi-year effort
+  - started with getting TTG into the AST
+
+** Now starting the actual work
+
+ - There has been some sporadic discussion about this on ghc gitlab.
+ - But some things have changed
+   - parser cleanup / reorganise
+   - recent src_haskell[:exports code]{XRec} ping-pong landed
+ - Decided to try to actually do it, based on prior discussion, and see
+   what snags come up.
+
+** Technical approach
+
+ - This is HIW, going into detail
+
+ - Two main goals
+   - Get rid of the src_haskell[:exports code]{SrcSpan} indexing, by moving the annotations into
+     the src_haskell[:exports code]{ParsedSource}
+   - Make the annotations properly typed
+#+begin_src haskell
+type ApiAnns = ( Map ApiAnnKey [SrcSpan]
+               , Map SrcSpan [Located AnnotationComment])
+type ApiAnnKey = (SrcSpan, AnnKeywordId)
+#+end_src
+
+** How does it work for ghc-exactprint?
+
+ - Input: src_haskell[:exports code]{ParsedSource}, and separate annotations
+
+ - Convert the original annotations into a *delta* format, which
+   tracks the annotation location wrt the start of the containing
+   src_haskell[:exports code]{SrcSpan}
+
+ - Keep an explicit list of the order of items, so we do not have to
+   use the src_haskell[:exports code]{SrcSpan} order, for adding, or
+   moving items around.
+
+ - These are still in a separate data structure
+
+#+REVEAL: split
+ - Provides a src_haskell[:exports code]{TransformT} monad transformer
+   to manage the linkage of the src_haskell[:exports
+   code]{ParsedSource} and its annotations.
+
+ - Utility to reproduce the source text, from the (possibly modified)
+   src_haskell[:exports code]{ParsedSource} and the updated delta
+   annotations.
+
+*** aside: copying code
+ - With the "loose" linkage scheme, it means if you copy an AST
+   fragment, it is hard to make changes to one copy only, without
+   duplicating the annotations against a new set of
+   src_haskell[:exports code]{SrcSpan}s for indexing.
+
+** How does this map through?
+** In-tree annotations
+
+- Note: this is a proposal, for to discussion. It is based on actual
+  work, to see real world implications of the decisions.
+
+- The annotations are inside the tree, using the TTG extension points,
+  for src_haskell[:exports code]{GhcPs}. There is one per AST element.
+
+- Each annotation has a standard structure part, and a
+  context-sensitive part.
+
+*** Detail
+- So we have
+
+# #+ATTR_REVEAL: :code_attribs data-line-numbers='2|4'
+#+BEGIN_SRC haskell
+data ApiAnn' ann
+  = ApiAnn { anchor   :: RealSrcSpan
+           , anns     :: ann
+           , comments :: [RealLocated AnnotationComment]
+           }
+  | ApiAnnNotUsed
+#+END_SRC
+
+- Because we store the anchor, we do not require a delta phase
+  - *all the annotations are used relative to the original anchor,
+    regardless of where it is used in the tree now*.
+- open question: can we do away with the anchor, and store the
+  annotations as offset wrt the original anchor instead?
+  - That is an optimisation, first make it work.
+
+*** For example
+#+BEGIN_SRC haskell
+data ApiAnnHsCase = ApiAnnHsCase
+      { hsCaseAnnCase :: RealSrcSpan
+      , hsCaseAnnOf   :: RealSrcSpan
+      , hsCaseAnnsRest :: [AddApiAnn]
+      } deriving Data
+#+END_SRC
+
+Attached as
+
+#+BEGIN_SRC haskell
+  | HsCase      (XCase p)
+                (LHsExpr p)
+                (MatchGroup p (LHsExpr p))
+
+type instance XCase          GhcPs = ApiAnn' ApiAnnHsCase
+#+END_SRC
+
+*** Note
+- In WIP these are not fully worked through, shown viable in
+  concept, keeping much the same to start with to chew the elephant in
+  pieces.
+
+** Hence
+
+#+BEGIN_SRC haskell
+type ApiAnn = ApiAnn' [AddApiAnn]
+#+END_SRC
+
+** SrcSpan annotations
+
+- Yes, we still have them
+
+- They are needed for specific purposes
+  - RdrName decorations:
+    src_haskell[:exports code]{`foo`},
+    src_haskell[:exports code]{':},
+    src_haskell[:exports code]{(&)},
+  - Contextual usage
+    - trailing commas, semis, src_haskell[:exports code]{|}
+
+- This means we attach a different *kind* of location to each Located
+  AST element
+  - Aside: I did a quick rebase two weeks ago, and fell into a
+    nightmare of src_haskell[:exports code]{XRec} usages.
+
+** XRec
+
+- In master we have
+
+#+BEGIN_SRC haskell
+type family XRec p a = r | r -> a
+type instance XRec (GhcPass p) a = Located a
+type LHsExpr p = XRec p (HsExpr p)
+#+END_SRC
+
+- This mimics the "old" scheme where everything is located.
+
+- For GHC exactprint we adapt it as
+
+#+BEGIN_SRC haskell
+type instance XRec (GhcPass p) a = GenLocated (Anno a) a
+
+type family Anno a = b
+#+END_SRC
+
+- It is still located, but each AST element has a knob to
+  set precisely what location type to use.
+
+ (Thanks Zubin Duggal for helping me with this)
+
+*** Kinds of location
+ (well, not kinds. Kinds.)
+
+ We again have a regular structure for this
+
+ #+BEGIN_SRC haskell
+ data SrcSpanAnn' a = SrcSpanAnn { ann :: a, locA :: SrcSpan }
+ #+END_SRC
+
+ We have identified five different ones
+
+ #+BEGIN_SRC haskell
+ type SrcSpanAnnA = SrcSpanAnn' (ApiAnn' AnnListItem)
+ type SrcSpanAnnL = SrcSpanAnn' (ApiAnn' AnnList)
+ type SrcSpanAnnP = SrcSpanAnn' (ApiAnn' AnnPragma)
+ type SrcSpanAnnC = SrcSpanAnn' (ApiAnn' AnnContext)
+ type SrcSpanAnnName = SrcSpanAnn' (ApiAnn' NameAnn)
+ #+END_SRC
+
+ In "normal" usage we can have
+
+ #+BEGIN_SRC haskell
+ type LocatedA = GenLocated SrcSpanAnnA
+ type LocatedL = GenLocated SrcSpanAnnL
+ type LocatedP = GenLocated SrcSpanAnnP
+ type LocatedC = GenLocated SrcSpanAnnC
+ type LocatedN = GenLocated SrcSpanAnnName
+
+ type LocatedAn an = GenLocated (SrcSpanAnn' (ApiAnn' an))
+ #+END_SRC
+
+*** Putting it all together
+
+ #+BEGIN_SRC haskell
+ type LHsExpr p = XRec p (HsExpr p)
+ type instance Anno (HsExpr (GhcPass p)) = SrcSpanAnnA
+
+ foo :: LocatedA (HsExpr GhcPs)
+ bar :: LHsExpr GhcPs
+ #+END_SRC
+
+ Note: in instance declarations, you have to use the
+ src_haskell[:exports code]{foo} form, which matches the "after
+ resolution" src_haskell[:exports code]{XRec} family.
+
+** AnnSortKey
+
+** Usage for printing
+
+ - This part is still under heavy development, but enough has been done
+   to indicate viability
+ - based heavily on the ghc-exactprint print phase.
+
+** Depth-first traversal of the AST
+- Keeps track of a left margin for current indentation level
+- Processes each print operation using the "top left corner" as the
+  reference point.
+  - This is the src_haskell[:exports code]{anchor} field from earlier
+  - implication: there is a "print head" position. It can only move
+    forward. So all annotated items must come to the right or below the
+    anchor.
+
+#+BEGIN_SRC haskell
+data Entry = Entry RealSrcSpan [RealLocated AnnotationComment]
+           | NoEntryVal
+#+END_SRC
+
+#+REVEAL: split
+- comments are handed to the printer, it inserts them into the
+  appropriate place in the output stream (modulo the anchor offset).
+
+  - Aside: comments are allowed to go left of the anchor column, but
+    clip against the left margin.
+
+** ExactPrint
+
+#+BEGIN_SRC haskell
+class ExactPrint a where
+  getAnnotationEntry :: a -> Entry
+  exact :: a -> Annotated ()
+#+END_SRC
+
+- Note: src_haskell[:exports code]{exact} is analogous to
+  src_haskell[:exports code]{ppr}, where src_haskell[:exports
+  code]{ExactPrint} is analogous to src_haskell[:exports
+  code]{Outputable}
+
+- Printing uses the anchor in the annotation, so the
+  src_haskell[:exports code]{getAnnotationEntry} pulls it out if it
+  exists, together with any comments in the span of the item.
+
+- This anchor is used for an src_haskell[:exports code]{enterAnn} routing
+
+#+REVEAL: split
+Simplest example
+
+#+BEGIN_SRC haskell
+instance (ExactPrint a) => ExactPrint (Located a) where
+  getAnnotationEntry (L l _) = Entry (realSrcSpan l) []
+  exact (L _ a) = markAnnotated a
+#+END_SRC
+
+src_haskell[:exports code]{markAnnotated} manages the process of
+descending into an enclosed AST item.
+#+begin_notes
+- (Aside: the name is a holdover from ghc-exactprint, from the
+  original process. It is already a misnomer there too)
+#+end_notes
+
+#+BEGIN_SRC haskell
+markAnnotated :: ExactPrint a => a -> Annotated ()
+markAnnotated a = enterAnn (getAnnotationEntry a) a
+#+END_SRC
+
+The trivial version of src_haskell[:exports code]{enterAnn}, but
+showing the basic interleaving flow, is
+
+#+BEGIN_SRC haskell
+enterAnn :: (ExactPrint a) => Entry -> a -> Annotated ()
+enterAnn NoEntryVal a = do
+  exact a
+#+END_SRC
+
+#+REVEAL: split
+The version where there *is* an src_haskell[:exports code]{EntryVal}
+is
+
+#+BEGIN_SRC haskell
+enterAnn (Entry anchor cs) a = do
+  addComments cs
+  printComments anchor
+  off <- gets epLHS
+  priorEndAfterComments <- getPos
+  let edp = adjustDeltaForOffset
+              off (ss2delta priorEndAfterComments anchor)
+  let
+    st = annNone { annEntryDelta = edp }
+  withOffset st (advance edp >> exact a)
+#+END_SRC
+
+#+BEGIN_SRC haskell
+withOffset :: Annotation -> (EPP a -> EPP a)
+withOffset a =
+  local (\s -> s { epAnn = a })
+#+END_SRC
+
+** src_haskell[:exports code]{ExactPrint} examples
+
+ #+BEGIN_SRC haskell
+ instance ExactPrint (HsTupArg GhcPs) where
+   getAnnotationEntry = const NoEntryVal
+
+   exact (Present _ e) = markAnnotated e
+   exact (Missing _) = return ()
+ #+END_SRC
+
+ #+BEGIN_SRC haskell
+ instance ExactPrint (HsValBindsLR GhcPs GhcPs) where
+   getAnnotationEntry = const NoEntryVal
+
+   exact (ValBinds sortkey binds sigs) = do
+     applyListAnnotations
+        (prepareListAnnotationA (bagToList binds)
+      ++ prepareListAnnotationA sigs
+        )
+ #+END_SRC
+
+#+REVEAL: split
+ #+BEGIN_SRC haskell
+ prepareListAnnotationA :: ExactPrint (LocatedAn an a)
+   => [LocatedAn an a] -> [(RealSrcSpan,EPP ())]
+ prepareListAnnotationA ls
+  = map (\b -> (realSrcSpan $ getLocA b,markAnnotated b)) ls
+
+ applyListAnnotations :: [(RealSrcSpan, EPP ())] -> EPP ()
+ applyListAnnotations ls = withSortKey ls
+ #+END_SRC
+
+ #+BEGIN_SRC haskell
+ withSortKey :: [(RealSrcSpan, EPP ())] -> EPP ()
+ withSortKey xs = do
+   Ann{annSortKey} <- asks epAnn
+   let ordered = case annSortKey of
+                   NoAnnSortKey    -> sortBy orderByFst xs
+                   Annsortkey keys -> orderByKey xs keys
+   mapM_ snd ordered
+ #+END_SRC
+
+ #+BEGIN_SRC haskell
+ data AnnSortKey
+   = NoAnnSortKey
+   | AnnSortKey [RealSrcSpan]
+ #+END_SRC
+
+** Usage for editing
+
+ - Annotations are inside the AST, so it is simply a matter of re-arranging them.
+ - Annotations are self-contained, so the SrcSpan is not important in
+   terms of printing AST fragments.  So freely able to delete, move,
+   duplicate fragments.
+   - Note: _uniqueness_ is important for ordering of binds,
+     declarations, etc
+ - Single pass, so no intermediate processing required.
+
+* Future directions
+
+- Some sort of printer combinators, derived from the annotations, or
+  *as* the annotations.
+- harmonisation between exact printing and ppr printing
+  - Note: exact printing only feasible for ParsedSource.
+- Sort out the RdrName <-> Name <-> Id mapping
+  - This currently happens (for API tooling) via the
+    src_haskell[:exports code]{LocatedN RdrName} SrcSpan.
+- Update ParsedSource so that AnnSortKey is unnecessary
+
