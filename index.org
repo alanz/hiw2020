@@ -93,7 +93,7 @@ original source
 - Move the exact printing into the GHC source tree
 
   - Multi-year effort
-  - started with getting TTG into the AST
+  - started with getting [[https://gitlab.haskell.org/ghc/ghc/-/wikis/implementing-trees-that-grow][Trees That Grow]] into the AST
 
 ** Now starting the actual work
 
@@ -258,20 +258,31 @@ type family Anno a = b
 
 We again have a regular structure for this
 
- #+BEGIN_SRC haskell
- data SrcSpanAnn' a = SrcSpanAnn { ann :: a, locA :: SrcSpan }
- #+END_SRC
+#+BEGIN_SRC haskell
+data SrcSpanAnn' a = SrcSpanAnn { ann :: a, locA :: SrcSpan }
+#+END_SRC
 
- We have identified five different ones
+We have identified five different ones
 
- #+BEGIN_SRC haskell
- type SrcSpanAnnA = SrcSpanAnn' (ApiAnn' AnnListItem)
- type SrcSpanAnnL = SrcSpanAnn' (ApiAnn' AnnList)
- type SrcSpanAnnP = SrcSpanAnn' (ApiAnn' AnnPragma)
- type SrcSpanAnnC = SrcSpanAnn' (ApiAnn' AnnContext)
- type SrcSpanAnnName = SrcSpanAnn' (ApiAnn' NameAnn)
- #+END_SRC
+#+BEGIN_SRC haskell
+type SrcSpanAnnA = SrcSpanAnn' (ApiAnn' AnnListItem)
+type SrcSpanAnnL = SrcSpanAnn' (ApiAnn' AnnList)
+type SrcSpanAnnP = SrcSpanAnn' (ApiAnn' AnnPragma)
+type SrcSpanAnnC = SrcSpanAnn' (ApiAnn' AnnContext)
+type SrcSpanAnnName = SrcSpanAnn' (ApiAnn' NameAnn)
+#+END_SRC
 
+#+BEGIN_SRC haskell
+data AnnList
+  = AnnList {
+      al_open      :: Maybe AddApiAnn,
+      al_close     :: Maybe AddApiAnn,
+      al_rest      :: [AddApiAnn],
+      al_trailing  :: [TrailingAnn]
+      } deriving (Data,Eq)
+#+END_SRC
+
+#+REVEAL: split
  In "normal" usage we can have
 
  #+BEGIN_SRC haskell
@@ -464,3 +475,16 @@ withOffset a =
   - This currently happens (for API tooling) via the
     src_haskell[:exports code]{LocatedN RdrName} SrcSpan.
 - Update ParsedSource so that AnnSortKey is unnecessary
+
+* Links
+
+- Presentation : https://alanz.github.io/hiw2020
+- GHC Wiki on in-tree-api-annotations
+  - https://gitlab.haskell.org/ghc/ghc/-/wikis/implementing-trees-that-grow/in-tree-api-annotations
+- GHC issue: [[https://gitlab.haskell.org/ghc/ghc/-/issues/17638][#17638]]
+- GHC WIP Merge Request: [[https://gitlab.haskell.org/ghc/ghc/-/merge_requests/2418][!2418]]
+  - "WIP: Proof of Concept implementation of in-tree API Annotations"
+- GHC dev branch: [[https://gitlab.haskell.org/ghc/ghc/-/tree/wip/az/exactprint][wip/az/exactprint]]
+- Me
+  - Twitter: [[https://twitter.com/@alan_zimm][src_haskell[:exports code]{@alan_zimm}]]
+  - Github: https://github.com/alanz
