@@ -7,7 +7,7 @@
 #+REVEAL_THEME: white
 #+REVEAL_HLEVEL: 2
 #+REVEAL_TRANS: linear
-#+REVEAL_PLUGINS: (markdown notes)
+#+REVEAL_PLUGINS: (markdown notes )
 #+REVEAL_EXTRA_CSS: ./local.css
 # #+REVEAL_SLIDE_HEADER: HEADER_BLAH_BLAH
 # #+REVEAL_SLIDE_FOOTER: FOOTER_BLAH_BLAH
@@ -52,6 +52,8 @@ original source
 ** Implications
 
  - layout
+   - moving things around
+   - changing names to be longer or shorter
  - order in lists
  - comments
  - src_haskell[:exports code]{SrcSpan}s are no longer meaningful
@@ -178,7 +180,6 @@ data ApiAnn' ann
 - open question: can we do away with the anchor, and store the
   annotations as offset wrt the original anchor instead?
   - That is an optimisation, first make it work.
-
 *** For example
 #+BEGIN_SRC haskell
 data ApiAnnHsCase = ApiAnnHsCase
@@ -191,11 +192,40 @@ data ApiAnnHsCase = ApiAnnHsCase
 Attached as
 
 #+BEGIN_SRC haskell
-  | HsCase      (XCase p)
+  | HsCase      (XCase p) -- TTG extension point
                 (LHsExpr p)
                 (MatchGroup p (LHsExpr p))
 
-type instance XCase          GhcPs = ApiAnn' ApiAnnHsCase
+type instance XCase GhcPs = ApiAnn' ApiAnnHsCase -- TTG usage
+#+END_SRC
+
+*** Concrete Example
+
+#+BEGIN_SRC haskell
+-- 123456789012345
+043  case  x  of
+044    1 -> True
+045    ..
+#+END_SRC
+
+#+BEGIN_SRC haskell
+ (HsCase
+  (ApiAnn
+   { (43,3)-(45,14) }                        -- anchor
+   (ApiAnnHsCase { 43:3-6 } { 43:12-13 } []) -- anns
+   [])                                       -- comments
+  (L (SrcSpanAnn (ApiAnnNotUsed) { 43:9 })
+   (HsVar .. {OccName: x}))
+  (MG
+   (NoExtField)
+   (L (SrcSpanAnn (ApiAnn { (44,5)-(45,14) ...))))))
+#+END_SRC
+
+#+BEGIN_SRC haskell
+ (DP (0,0),"case") -- (43, 3)
+ (DP (0,2),"x")    -- (43, 9)
+ (DP (0,2),"of")   -- (43,12)
+ (DP (1,2),"1")    -- (44, 5) wrt (43,3) anchor
 #+END_SRC
 
 *** Note
