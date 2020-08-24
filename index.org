@@ -228,10 +228,14 @@ type ApiAnn = ApiAnn' [AddApiAnn]
 
 ** XRec
 
-- In master we have
-
 #+BEGIN_SRC haskell
 type family XRec p a = r | r -> a
+-- | We can strip off the XRec to access the underlying data.
+class UnXRec p where
+  unXRec :: XRec p a -> a
+#+END_SRC
+
+#+BEGIN_SRC haskell
 type instance XRec (GhcPass p) a = Located a
 type LHsExpr p = XRec p (HsExpr p)
 #+END_SRC
@@ -248,13 +252,11 @@ type family Anno a = b
 
 - It is still located, but each AST element has a knob to
   set precisely what location type to use.
-
- (Thanks Zubin Duggal for helping me with this)
+(Thanks Zubin Duggal for helping me with this)
 
 *** Kinds of location
- (well, not kinds. Kinds.)
 
- We again have a regular structure for this
+We again have a regular structure for this
 
  #+BEGIN_SRC haskell
  data SrcSpanAnn' a = SrcSpanAnn { ann :: a, locA :: SrcSpan }
@@ -331,10 +333,9 @@ class ExactPrint a where
   exact :: a -> Annotated ()
 #+END_SRC
 
-- Note: src_haskell[:exports code]{exact} is analogous to
-  src_haskell[:exports code]{ppr}, where src_haskell[:exports
-  code]{ExactPrint} is analogous to src_haskell[:exports
-  code]{Outputable}
+- Note:
+  - src_haskell[:exports code]{ExactPrint} is analogous to src_haskell[:exports code]{Outputable}
+  - src_haskell[:exports code]{exact} is analogous to src_haskell[:exports code]{ppr}
 
 - Printing uses the anchor in the annotation, so the
   src_haskell[:exports code]{getAnnotationEntry} pulls it out if it
@@ -463,4 +464,3 @@ withOffset a =
   - This currently happens (for API tooling) via the
     src_haskell[:exports code]{LocatedN RdrName} SrcSpan.
 - Update ParsedSource so that AnnSortKey is unnecessary
-
