@@ -113,9 +113,9 @@ original source
      the src_haskell[:exports code]{ParsedSource}
    - Make the annotations properly typed
 #+begin_src haskell
+type ApiAnnKey = (SrcSpan, AnnKeywordId)
 type ApiAnns = ( Map ApiAnnKey [SrcSpan]
                , Map SrcSpan [Located AnnotationComment])
-type ApiAnnKey = (SrcSpan, AnnKeywordId)
 #+end_src
 
 ** How does it work for ghc-exactprint?
@@ -150,7 +150,7 @@ type ApiAnnKey = (SrcSpan, AnnKeywordId)
 ** How does this map through?
 ** In-tree annotations
 
-- Note: this is a proposal, for to discussion. It is based on actual
+- Note: this is a proposal, for discussion. It is based on actual
   work, to see real world implications of the decisions.
 
 - The annotations are inside the tree, using the TTG extension points,
@@ -200,8 +200,8 @@ type instance XCase          GhcPs = ApiAnn' ApiAnnHsCase
 
 *** Note
 - In WIP these are not fully worked through, shown viable in
-  concept, keeping much the same to start with to chew the elephant in
-  pieces.
+  concept, keeping much the same to start with.
+- (chew the elephant in small pieces)
 
 ** Hence
 
@@ -219,7 +219,7 @@ type ApiAnn = ApiAnn' [AddApiAnn]
     src_haskell[:exports code]{':},
     src_haskell[:exports code]{(&)},
   - Contextual usage
-    - trailing commas, semis, src_haskell[:exports code]{|}
+    - trailing src_haskell[:exports code]{,}, src_haskell[:exports code]{;}, src_haskell[:exports code]{|}
 
 - This means we attach a different *kind* of location to each Located
   AST element
@@ -242,7 +242,7 @@ type LHsExpr p = XRec p (HsExpr p)
 
 - This mimics the "old" scheme where everything is located.
 
-- For GHC exactprint we adapt it as
+- For exactprint in GHC we adapt it as
 
 #+BEGIN_SRC haskell
 type instance XRec (GhcPass p) a = GenLocated (Anno a) a
@@ -302,7 +302,7 @@ We again have a regular structure for this
 
  - This part is still under heavy development, but enough has been done
    to indicate viability
- - based heavily on the ghc-exactprint print phase.
+ - based heavily on the *ghc-exactprint* print phase.
 
 ** Depth-first traversal of the AST
 - Keeps track of a left margin for current indentation level
