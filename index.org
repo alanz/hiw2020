@@ -501,6 +501,7 @@ withOffset a =
   - This currently happens (for API tooling) via the
     src_haskell[:exports code]{LocatedN RdrName} SrcSpan.
 - Update ParsedSource so that AnnSortKey is unnecessary
+- Get rid of CPP in favour of a tooling-friendly option
 
 * Links
 
