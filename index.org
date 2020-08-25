@@ -25,6 +25,24 @@
     * ghc-exactprint
     * haskell-language-server ecosystem
 
+* Goals of an Exact Printer
+
+- First, accurately reproduce the source code, from the src_haskell[:exports code]{ParsedSource}
+- Second, more important
+  * allow *changes* to be made to the src_haskell[:exports
+    code]{ParsedSource}, purely as transformations of the AST,
+  * such that when printed out the source still reflects the original as much as possible
+  * *and* the code still compiles. (HaRe background)
+
+** Implications
+
+ - layout
+   - moving things around
+   - changing names to be longer or shorter
+ - order in lists
+ - comments
+ - src_haskell[:exports code]{SrcSpan}s are no longer meaningful
+
 * ghc-exactprint
 
 # #+ATTR_REVEAL: :frag (appear)
@@ -40,25 +58,7 @@
 By *GHC 7.10* the src_haskell[:exports code]{ParsedSource} accurately reflected the state of the
 original source
 
-** Goals
-
- - First, accurately reproduce the source code, from the src_haskell[:exports code]{ParsedSource}
- - Second, more important
-   * allow *changes* to be made to the src_haskell[:exports
-     code]{ParsedSource}, purely as transformations of the AST,
-   * such that when printed out the source still reflects the original as much as possible
-   * *and* the code still compiles. (HaRe background)
-
-** Implications
-
- - layout
-   - moving things around
-   - changing names to be longer or shorter
- - order in lists
- - comments
- - src_haskell[:exports code]{SrcSpan}s are no longer meaningful
-
-** Successful
+** ghc-exactprint is successful
 
  - Many tools built on top of it
      * HaRe (now dormant)
@@ -103,12 +103,11 @@ original source
  - But some things have changed
    - parser cleanup / reorganise
    - recent src_haskell[:exports code]{XRec} ping-pong landed
- - Decided to try to actually do it, based on prior discussion, and see
-   what snags come up.
+ - /Note:/
+   - /This is a proposal, for discussion/
+   - /It is based on actual work, to see real world implications of the decisions/
 
 ** Technical approach
-
- - This is HIW, going into detail
 
  - Two main goals
    - Get rid of the src_haskell[:exports code]{SrcSpan} indexing, by moving the annotations into
@@ -118,6 +117,10 @@ original source
 type ApiAnnKey = (SrcSpan, AnnKeywordId)
 type ApiAnns = ( Map ApiAnnKey [SrcSpan]
                , Map SrcSpan [Located AnnotationComment])
+data AnnKeywordId
+    = AnnAnyclass
+    | AnnAs
+    | AnnAt
 #+end_src
 
 ** How does it work for ghc-exactprint?
@@ -152,14 +155,12 @@ type ApiAnns = ( Map ApiAnnKey [SrcSpan]
 ** How does this map through?
 ** In-tree annotations
 
-- Note: this is a proposal, for discussion. It is based on actual
-  work, to see real world implications of the decisions.
-
 - The annotations are inside the tree, using the TTG extension points,
   for src_haskell[:exports code]{GhcPs}. There is one per AST element.
 
 - Each annotation has a standard structure part, and a
   context-sensitive part.
+
 
 *** Detail
 - So we have
@@ -233,15 +234,15 @@ type instance XCase GhcPs = ApiAnn' ApiAnnHsCase -- TTG usage
   concept, keeping much the same to start with.
 - (chew the elephant in small pieces)
 
-** Hence
+*** Hence
 
-#+BEGIN_SRC haskell
-type ApiAnn = ApiAnn' [AddApiAnn]
-#+END_SRC
+ #+BEGIN_SRC haskell
+ type ApiAnn = ApiAnn' [AddApiAnn]
+ #+END_SRC
 
-** SrcSpan annotations
+** src_haskell[:exports code]{Located} annotations
 
-- Yes, we still have them
+- Some annotations need to apply to all constructors of a data type.
 
 - They are needed for specific purposes
   - RdrName decorations:
@@ -251,12 +252,9 @@ type ApiAnn = ApiAnn' [AddApiAnn]
   - Contextual usage
     - trailing src_haskell[:exports code]{,}, src_haskell[:exports code]{;}, src_haskell[:exports code]{|}
 
-- This means we attach a different *kind* of location to each Located
-  AST element
-  - Aside: I did a quick rebase two weeks ago, and fell into a
-    nightmare of src_haskell[:exports code]{XRec} usages.
+- We use the fact that AST elements are src_haskell[:exports code]{Located} to piggy-back annotations.
 
-** XRec
+** src_haskell[:exports code]{XRec} Locations
 
 #+BEGIN_SRC haskell
 type family XRec p a = r | r -> a
@@ -282,34 +280,32 @@ type family Anno a = b
 
 - It is still located, but each AST element has a knob to
   set precisely what location type to use.
-(Thanks Zubin Duggal for helping me with this)
+(/Thanks Zubin Duggal for helping me with this/)
 
 *** Kinds of location
 
-We again have a regular structure for this
+There is a regular structure for this
 
 #+BEGIN_SRC haskell
 data SrcSpanAnn' a = SrcSpanAnn { ann :: a, locA :: SrcSpan }
 #+END_SRC
 
-We have identified five different ones
+Example usage
 
 #+BEGIN_SRC haskell
-type SrcSpanAnnA = SrcSpanAnn' (ApiAnn' AnnListItem)
-type SrcSpanAnnL = SrcSpanAnn' (ApiAnn' AnnList)
-type SrcSpanAnnP = SrcSpanAnn' (ApiAnn' AnnPragma)
-type SrcSpanAnnC = SrcSpanAnn' (ApiAnn' AnnContext)
+type SrcSpanAnnA    = SrcSpanAnn' (ApiAnn' AnnListItem)
 type SrcSpanAnnName = SrcSpanAnn' (ApiAnn' NameAnn)
 #+END_SRC
 
 #+BEGIN_SRC haskell
-data AnnList
-  = AnnList {
-      al_open      :: Maybe AddApiAnn,
-      al_close     :: Maybe AddApiAnn,
-      al_rest      :: [AddApiAnn],
-      al_trailing  :: [TrailingAnn]
-      } deriving (Data,Eq)
+data AnnListItem
+  = AnnListItem {
+      lann_trailing  :: [TrailingAnn]
+      }
+data TrailingAnn
+  = AddSemiAnn RealSrcSpan
+  | AddCommaAnn RealSrcSpan
+  ..
 #+END_SRC
 
 #+REVEAL: split
@@ -317,9 +313,6 @@ data AnnList
 
  #+BEGIN_SRC haskell
  type LocatedA = GenLocated SrcSpanAnnA
- type LocatedL = GenLocated SrcSpanAnnL
- type LocatedP = GenLocated SrcSpanAnnP
- type LocatedC = GenLocated SrcSpanAnnC
  type LocatedN = GenLocated SrcSpanAnnName
 
  type LocatedAn an = GenLocated (SrcSpanAnn' (ApiAnn' an))
@@ -405,6 +398,7 @@ markAnnotated :: ExactPrint a => a -> Annotated ()
 markAnnotated a = enterAnn (getAnnotationEntry a) a
 #+END_SRC
 
+#+REVEAL: split
 The trivial version of src_haskell[:exports code]{enterAnn}, but
 showing the basic interleaving flow, is
 
@@ -447,6 +441,7 @@ withOffset a =
    exact (Missing _) = return ()
  #+END_SRC
 
+#+REVEAL: split
  #+BEGIN_SRC haskell
  instance ExactPrint (HsValBindsLR GhcPs GhcPs) where
    getAnnotationEntry = const NoEntryVal
@@ -494,6 +489,7 @@ withOffset a =
    - Note: _uniqueness_ is important for ordering of binds,
      declarations, etc
  - Single pass, so no intermediate processing required.
+   - /To be confirmed. Currently having doubts/
 
 * Future directions
 
