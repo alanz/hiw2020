@@ -17,18 +17,6 @@
 - Alan Zimmerman
 - [[https://twitter.com/@alan_zimm][src_haskell[:exports code]{@alan_zimm}]]
 
-* Introduction
-
-#+ATTR_REVEAL: :frag (none appear)
-- It all started with *HaRe*
-- Two main problems
-  + integrate down into GHC
-  + integrate up into IDEs
-
-- I favour general solutions
-  + ghc-exactprint
-  + haskell-language-server ecosystem
-
 * Goals of an Exact Printer
 
 #+ATTR_REVEAL: :frag (appear)
@@ -38,7 +26,7 @@
   * such that when printed out the source still reflects the original as much as possible
   * *and* the code still compiles.
 
-** Implications
+** Complications
 
 #+ATTR_REVEAL: :frag (appear)
  - Haskell is layout sensitive
@@ -48,9 +36,8 @@
      baz = bar where x = 1
                      bar = 2
      #+end_src
- - order in lists
+ - order in lists - src_haskell[:exports code]{SrcSpan}s are no longer meaningful
  - comments
- - src_haskell[:exports code]{SrcSpan}s are no longer meaningful
 
 * ghc-exactprint
 
@@ -131,9 +118,9 @@
      type ApiAnns = ( Map ApiAnnKey [SrcSpan]
                     , Map SrcSpan [Located AnnotationComment])
      data AnnKeywordId
-         = AnnAnyclass
-         | AnnAs
-         | AnnAt
+         = AnnAnyclass -- 'anyclass'
+         | AnnAs       -- 'as'
+         | AnnAt       -- 'at'
      #+end_src
 
 ** How does it work for ghc-exactprint?
@@ -141,9 +128,7 @@
  - Input: src_haskell[:exports code]{ParsedSource}, and separate annotations
 
  - Convert the original annotations into a *delta* format, which
-   tracks the annotation location wrt the start of the containing
-   src_haskell[:exports code]{SrcSpan}
-
+   tracks the annotation location wrt preceding output.
  - Keep an explicit list of the order of items, so we do not have to
    use the src_haskell[:exports code]{SrcSpan} order, for adding, or
    moving items around.
@@ -171,17 +156,13 @@
     | ApiAnnNotUsed
   #+END_SRC
 
-- Because we store the anchor, we do not require a delta phase
   - *all the annotations are used relative to the original anchor,
     regardless of where it is used in the tree now*.
-- open question: can we do away with the anchor, and store the
-  annotations as offset wrt the original anchor instead?
-  - That is an optimisation, first make it work.
 *** Example
 #+BEGIN_SRC haskell
 data ApiAnnHsCase = ApiAnnHsCase
-      { hsCaseAnnCase :: RealSrcSpan
-      , hsCaseAnnOf   :: RealSrcSpan
+      { hsCaseAnnCase :: RealSrcSpan -- 'case' location
+      , hsCaseAnnOf   :: RealSrcSpan -- 'of' location
       , hsCaseAnnsRest :: [AddApiAnn]
       }
 data AddApiAnn = AddApiAnn AnnKeywordId RealSrcSpan
@@ -231,7 +212,7 @@ type instance XCase GhcPs = ApiAnn' ApiAnnHsCase -- TTG usage
 - Some annotations need to apply to all constructors of a data type.
 
 - They are needed for specific purposes
-  - RdrName decorations:
+  - src_haskell[:exports code]{RdrName} decorations:
     src_haskell[:exports code]{`foo`},
     src_haskell[:exports code]{':},
     src_haskell[:exports code]{(&)},
